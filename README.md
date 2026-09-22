@@ -3,6 +3,11 @@
 A small expense-tracking API (FastAPI + SQLAlchemy + SQLite) with summary/insight
 endpoints, API key auth, and a minimal HTML/JS frontend.
 
+**Live demo:** https://spend-tracker-oo83.onrender.com — the API key isn't
+public; ask for it, or run it yourself with your own key (see below). Note
+the [ephemeral-SQLite caveat](#deployment-render): expenses added there don't
+survive a redeploy.
+
 ## Setup and run
 
 Requires Python 3.11+.
