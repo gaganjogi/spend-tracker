@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Spend Tracker</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; }
+  section { margin-bottom: 1.5rem; }
+  label { display: block; font-size: 0.85rem; margin-top: 0.5rem; }
+  input, button { font-size: 0.95rem; padding: 0.3rem 0.5rem; }
+  form { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; }
+  form > div { display: flex; flex-direction: column; }
+  table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; }
+  th, td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left; font-size: 0.9rem; }
+  .error { color: #b00020; font-size: 0.85rem; min-height: 1.2em; margin-top: 0.4rem; }
+  .top-bar { display: flex; gap: 0.75rem; align-items: flex-end; padding-bottom: 1rem; border-bottom: 1px solid #ccc; }
+  .rising-new { color: #7a5a00; }
+  .rising-increase { color: #b00020; }
+  ul { padding-left: 1.2rem; }
+</style>
+</head>
+<body>
+
+<h1>Spend Tracker</h1>
+
+<div class="top-bar">
+  <div>
+    <label for="api-key-input">API Key</label>
+    <input id="api-key-input" type="password" placeholder="X-API-Key" autocomplete="off" />
+  </div>
+  <button id="load-btn" type="button">Load</button>
+</div>
+
+<section>
+  <h2>Add Expense</h2>
+  <form id="expense-form">
+    <div>
+      <label for="expense-amount">Amount</label>
+      <input id="expense-amount" name="amount" type="number" step="any" required />
+      <!-- No min/step-multiple constraint here on purpose: amount validation
+           (positive, ≤2 decimals, ceiling) is the server's job, and the point
+           of this form is to show the API's own error messages, not pre-empt
+           them with a silent browser-native block. -->
+
+    </div>
+    <div>
+      <label for="expense-category">Category</label>
+      <input id="expense-category" name="category" type="text" required />
+    </div>
+    <div>
+      <label for="expense-note">Note</label>
+      <input id="expense-note" name="note" type="text" />
+    </div>
+    <div>
+      <label for="expense-date">Date</label>
+      <input id="expense-date" name="date" type="date" required />
+    </div>
+    <div>
+      <button type="submit">Add</button>
+    </div>
+  </form>
+  <div id="expense-error" class="error"></div>
+</section>
+
+<section>
+  <h2>Summary <button id="refresh-summary-btn" type="button">Refresh</button></h2>
+  <div id="summary-error" class="error"></div>
+  <p>Total spend: <strong id="summary-total">–</strong></p>
+
+  <h3>By category</h3>
+  <table>
+    <thead><tr><th>Category</th><th>Amount</th></tr></thead>
+    <tbody id="category-table-body"></tbody>
+  </table>
+
+  <h3>Month over month</h3>
+  <p>
+    <span id="mom-month">–</span>: <span id="mom-current">–</span>
+    vs <span id="mom-previous-month">–</span>: <span id="mom-previous">–</span>
+    — change: <span id="mom-change-amount">–</span>
+    (<span id="mom-change-percent">–</span>)
+  </p>
+
+  <h3>Categories up &gt;20% vs previous month</h3>
+  <ul id="rising-list"><li>–</li></ul>
+</section>
+
+<section>
+  <h2>Expenses</h2>
+  <form id="filter-form">
+    <div>
+      <label for="filter-category">Category</label>
+      <input id="filter-category" type="text" />
+    </div>
+    <div>
+      <label for="filter-start-date">From</label>
+      <input id="filter-start-date" type="date" />
+    </div>
+    <div>
+      <label for="filter-end-date">To</label>
+      <input id="filter-end-date" type="date" />
+    </div>
+    <div>
+      <button type="submit">Filter</button>
+    </div>
+  </form>
+  <div id="list-error" class="error"></div>
+  <p id="list-count"></p>
+  <table>
+    <thead><tr><th>Date</th><th>Category</th><th>Amount</th><th>Note</th></tr></thead>
+    <tbody id="expense-table-body"></tbody>
+  </table>
+</section>
+
+<script>
+  // Kept in a JS variable only — never written to localStorage/sessionStorage,
+  // so it disappears on page reload.
+  let apiKey = "";
+
+  function authHeaders(isJson) {
+    const h = { "X-API-Key": apiKey };
+    if (isJson) h["Content-Type"] = "application/json";
+    return h;
+  }
+
+  function formatError(body) {
+    const err = body && body.error;
+    if (!err) return "Unexpected error";
+    if (err.details && err.details.length) {
+      return err.details.map((d) => `${d.field}: ${d.message}`).join("; ");
+    }
+    return err.message || "Request failed";
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str == null ? "" : str;
+    return div.innerHTML;
+  }
+
+  async function addExpense(event) {
+    event.preventDefault();
+    const form = event.target;
+    const errorBox = document.getElementById("expense-error");
+    errorBox.textContent = "";
+
+    const payload = {
+      amount: form.amount.value,
+      category: form.category.value,
+      note: form.note.value || null,
+      date: form.date.value,
+    };
+
+    try {
+      const resp = await fetch("/expenses", {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify(payload),
+      });
+      const body = await resp.json();
+      if (!resp.ok) {
+        errorBox.textContent = formatError(body);
+        return;
+      }
+      form.reset();
+      document.getElementById("expense-date").valueAsDate = new Date();
+      await Promise.all([loadSummary(), loadExpenses()]);
+    } catch (err) {
+      errorBox.textContent = "Network error: " + err.message;
+    }
+  }
+
+  async function loadSummary() {
+    const box = document.getElementById("summary-error");
+    box.textContent = "";
+    try {
+      const resp = await fetch("/summary", { headers: authHeaders(false) });
+      const body = await resp.json();
+      if (!resp.ok) {
+        box.textContent = formatError(body);
+        return;
+      }
+      renderSummary(body);
+    } catch (err) {
+      box.textContent = "Network error: " + err.message;
+    }
+  }
+
+  function renderSummary(summary) {
+    document.getElementById("summary-total").textContent = summary.total;
+
+    const catBody = document.getElementById("category-table-body");
+    catBody.innerHTML = "";
+    summary.by_category.forEach((row) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${escapeHtml(row.category)}</td><td>${escapeHtml(row.amount)}</td>`;
+      catBody.appendChild(tr);
+    });
+
+    const mom = summary.month_over_month;
+    document.getElementById("mom-month").textContent = mom.month;
+    document.getElementById("mom-current").textContent = mom.current_total;
+    document.getElementById("mom-previous-month").textContent = mom.previous_month;
+    document.getElementById("mom-previous").textContent = mom.previous_total;
+    document.getElementById("mom-change-amount").textContent = mom.change_amount;
+    document.getElementById("mom-change-percent").textContent =
+      mom.change_percent === null ? "n/a (no spend last month)" : mom.change_percent + "%";
+
+    const risingList = document.getElementById("rising-list");
+    risingList.innerHTML = "";
+    if (summary.rising_categories.length === 0) {
+      risingList.innerHTML = "<li>None</li>";
+    } else {
+      summary.rising_categories.forEach((r) => {
+        const li = document.createElement("li");
+        li.className = r.flag === "new" ? "rising-new" : "rising-increase";
+        const pct = r.change_percent === null ? "new category" : `+${r.change_percent}%`;
+        li.textContent = `${r.category}: ${r.previous_amount} → ${r.current_amount} (${pct})`;
+        risingList.appendChild(li);
+      });
+    }
+  }
+
+  async function loadExpenses() {
+    const box = document.getElementById("list-error");
+    box.textContent = "";
+
+    const params = new URLSearchParams();
+    const category = document.getElementById("filter-category").value.trim();
+    const startDate = document.getElementById("filter-start-date").value;
+    const endDate = document.getElementById("filter-end-date").value;
+    if (category) params.set("category", category);
+    if (startDate) params.set("start_date", startDate);
+    if (endDate) params.set("end_date", endDate);
+
+    try {
+      const resp = await fetch("/expenses?" + params.toString(), { headers: authHeaders(false) });
+      const body = await resp.json();
+      if (!resp.ok) {
+        box.textContent = formatError(body);
+        return;
+      }
+      renderExpenses(body);
+    } catch (err) {
+      box.textContent = "Network error: " + err.message;
+    }
+  }
+
+  function renderExpenses(data) {
+    const tbody = document.getElementById("expense-table-body");
+    tbody.innerHTML = "";
+    data.items.forEach((item) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${item.date}</td><td>${escapeHtml(item.category)}</td><td>${escapeHtml(item.amount)}</td><td>${escapeHtml(item.note)}</td>`;
+      tbody.appendChild(tr);
+    });
+    document.getElementById("list-count").textContent = `Showing ${data.items.length} of ${data.total}`;
+  }
+
+  function refreshAll() {
+    loadSummary();
+    loadExpenses();
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("api-key-input").addEventListener("input", (e) => {
+      apiKey = e.target.value;
+    });
+    document.getElementById("load-btn").addEventListener("click", refreshAll);
+    document.getElementById("refresh-summary-btn").addEventListener("click", loadSummary);
+    document.getElementById("expense-form").addEventListener("submit", addExpense);
+    document.getElementById("filter-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      loadExpenses();
+    });
+    document.getElementById("expense-date").valueAsDate = new Date();
+  });
+</script>
+
+</body>
+</html>

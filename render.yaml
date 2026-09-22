@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: spend-tracker
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: API_KEY
+        sync: false
+      - key: DB_PATH
+        value: ./spend.db
