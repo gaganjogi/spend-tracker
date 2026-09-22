@@ -187,3 +187,7 @@ redeploy (and every time the free-tier instance spins down and back up)
 wipes the database. That's an accepted trade-off for a demo deployment, not
 something this setup tries to work around; a real deployment would use
 Postgres or a persistent disk.
+
+## License
+
+Take-home assignment submission — not intended for reuse.
