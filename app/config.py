@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     db_path: str = "./spend.db"
     # No default: fail loudly at startup if it's not set, rather than
-    # silently running unauthenticated. See app/auth.py and AI_LOG.md.
+    # silently running unauthenticated. See app/auth.py.
     api_key: str
 
 
